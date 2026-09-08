@@ -65,12 +65,19 @@ func (c *ConnectedWire) Set(g *Game, v bool) {
 }
 
 func (c *ConnectedWire) Delete(g *Game) {
+	cc := g.C[g.CIndex]
+	i := slices.Index(cc.ConnectedWires, c)
+	if i == -1 {
+		slog.Warn("Wire isn't tracked so cant delete")
+		return
+	}
+	cc.ConnectedWires = slices.Delete(cc.ConnectedWires, i, i+1)
 }
 
 func (c *ConnectedWire) Draw(g *Game) {
 	x1, y1 := c.In.ConnectionPosition(DirectionOut, c.InN)
 	x2, y2 := c.Out.ConnectionPosition(DirectionIn, c.OutN)
-	rl.DrawLine(x1, y1, x2, y2, rl.Blue)
+	rl.DrawLine(x1, y1, x2, y2, rl.Red)
 }
 
 func (d *DisconnectedWire) Query(g *Game) bool {
@@ -111,18 +118,47 @@ func (d *DisconnectedWire) Draw(g *Game) {
 
 func (d *DisconnectedWire) Release(g *Game) {
 	cc := g.C[g.CIndex]
-	for _, c := range cc.CircuitInstance {
+	var ok bool
+	var direction Direction
+	var n int32
+	var c *CircuitInstance
+	for _, c = range cc.CircuitInstance {
 		if CircuitWidth/2+ConnectionConnectAbleRadius < abs(d.X-c.X+CircuitWidth/2) && CircuitHeight/2+ConnectionConnectAbleRadius < abs(d.Y-c.Y+CircuitHeight/2) {
 			continue
 		}
-		ok, direction, n := c.PosConnectedTo(d.X, d.Y)
-		if !ok {
-			continue
+		ok, direction, n = c.PosConnectedTo(d.X, d.Y)
+		if ok {
+			break
 		}
-		x1, y1 := c.ConnectionPosition(direction, n)
-		d.X = x1
-		d.Y = y1
 	}
+	if !ok {
+		return
+	}
+	if direction == d.Direction {
+		slog.Info("Connected wires can only go in one direction for now cant connect input to input or output to output")
+		return
+	}
+	var cw *ConnectedWire
+	if direction == DirectionIn {
+		cw = &ConnectedWire{
+			In:   d.I,
+			Out:  c,
+			InN:  d.N,
+			OutN: n,
+		}
+	} else if direction == DirectionOut {
+		cw = &ConnectedWire{
+			In:   c,
+			Out:  d.I,
+			InN:  n,
+			OutN: d.N,
+		}
+	}
+
+	d.Delete(g)
+	d.I.SetWire(d.Direction, d.N, cw)
+	c.SetWire(direction, n, cw)
+	cc.ConnectedWires = append(cc.ConnectedWires, cw)
 }
 
 type WireI interface {
@@ -189,21 +225,34 @@ func (c *CircuitInstance) GetWire(d Direction, n int32) WireI {
 	return c.OutWires[n]
 }
 
-func (c *CircuitInstance) AddOrPickDisconnectedWire(direction Direction, n, x, y int32) *DisconnectedWire {
+func (c *CircuitInstance) AddOrPickDisconnectedWire(g *Game, direction Direction, n, x, y int32) *DisconnectedWire {
 	w := c.GetWire(direction, n)
-	if w != nil {
+	switch w.(type) {
+	case *DisconnectedWire:
 		return w.(*DisconnectedWire)
+	case *ConnectedWire:
+		w.Delete(g)
+		w1 := &DisconnectedWire{
+			I:         c,
+			Direction: direction,
+			N:         n,
+			X:         x,
+			Y:         y,
+		}
+		c.DisconnectedWires = append(c.DisconnectedWires, w1)
+		return w1
+	default:
+		w1 := &DisconnectedWire{
+			I:         c,
+			Direction: direction,
+			N:         n,
+			X:         x,
+			Y:         y,
+		}
+		c.SetWire(direction, n, w1)
+		c.DisconnectedWires = append(c.DisconnectedWires, w1)
+		return w1
 	}
-	w1 := &DisconnectedWire{
-		I:         c,
-		Direction: direction,
-		N:         n,
-		X:         x,
-		Y:         y,
-	}
-	c.SetWire(direction, n, w1)
-	c.DisconnectedWires = append(c.DisconnectedWires, w1)
-	return w1
 }
 
 func (c *CircuitInstance) ConnectionPosition(direction Direction, n int32) (x, y int32) {
@@ -361,7 +410,7 @@ func (g *Game) Actions() {
 
 			ok, direction, n := c.PosConnectedTo(px, py)
 			if ok {
-				holding := c.AddOrPickDisconnectedWire(direction, n, px, py)
+				holding := c.AddOrPickDisconnectedWire(g, direction, n, px, py)
 				g.Holding = holding
 
 				slog.Debug("Connection grabbed", "circuit", c.Name, "direction", direction, "index", n)
