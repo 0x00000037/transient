@@ -109,10 +109,20 @@ func (d *DisconnectedWire) Draw(g *Game) {
 	rl.DrawCircle(d.X, d.Y, ConnectionSize, rl.Blue)
 }
 
-func (d *DisconnectedWire) Release(g *Game, x, y int32) {
-	d.X = x
-	d.Y = y
-	//g.C[g.CIndex].DisconnectedWires = append(g.C[g.CIndex].DisconnectedWires, d)
+func (d *DisconnectedWire) Release(g *Game) {
+	cc := g.C[g.CIndex]
+	for _, c := range cc.CircuitInstance {
+		if CircuitWidth/2+ConnectionConnectAbleRadius < abs(d.X-c.X+CircuitWidth/2) && CircuitHeight/2+ConnectionConnectAbleRadius < abs(d.Y-c.Y+CircuitHeight/2) {
+			continue
+		}
+		ok, direction, n := c.PosConnectedTo(d.X, d.Y)
+		if !ok {
+			continue
+		}
+		x1, y1 := c.ConnectionPosition(direction, n)
+		d.X = x1
+		d.Y = y1
+	}
 }
 
 type WireI interface {
@@ -126,6 +136,10 @@ type CircuitInstance struct {
 
 	InWires  []WireI
 	OutWires []WireI
+}
+
+func (c *CircuitInstance) Release(g *Game) {
+
 }
 
 func (c *CircuitInstance) Delete(g *Game) {
@@ -219,6 +233,7 @@ type Circuit struct {
 type HoldingI interface {
 	HoldingNotify(g *Game, x, y int32)
 	Delete(g *Game)
+	Release(g *Game)
 }
 
 type Game struct {
@@ -365,6 +380,8 @@ func (g *Game) Actions() {
 		if g.Holding != nil {
 			if p.Y >= ComponentPickerStart {
 				g.Holding.Delete(g)
+			} else {
+				g.Holding.Release(g)
 			}
 			g.Holding = nil
 		}
