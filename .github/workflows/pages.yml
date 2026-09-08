@@ -1,0 +1,44 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [pages]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: web/go.mod
+      - name: Build wasm
+        working-directory: web
+        run: |
+          mkdir -p ../_site/rl
+          GOOS=js GOARCH=wasm go build -o ../_site/main.wasm .
+          cp Raylib-Go-Wasm/index/index.html Raylib-Go-Wasm/index/index.js Raylib-Go-Wasm/index/wasm_exec.js Raylib-Go-Wasm/index/runtime.js ../_site/
+          cp Raylib-Go-Wasm/index/rl/raylib.js Raylib-Go-Wasm/index/rl/raylib.wasm ../_site/rl/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
